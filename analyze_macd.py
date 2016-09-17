@@ -7,6 +7,7 @@ import os,time,sys,re,datetime
 import csv
 import scipy
 import smtplib
+from sklearn import svm
 from email.mime.text import MIMEText
 from email.MIMEMultipart import MIMEMultipart
  
@@ -15,7 +16,65 @@ from email.MIMEMultipart import MIMEMultipart
 def Get_Stock_List():
     df = ts.get_stock_basics()
     return df
+
+def Get_Csv_Data(code):
+    try:
+        print code, " retrieved successfully"
+        return pd.read_csv('/Users/xuji/Desktop/home_automation/stock_market_indicator/data/'+code+'.csv')
+    except:
+        price_list = ts.get_hist_data(code)
+        price_list.to_csv('/Users/xuji/Desktop/home_automation/stock_market_indicator/data/'+code+'.csv')
+        print code, " retrieved successfully"
+        return pd.read_csv('/Users/xuji/Desktop/home_automation/stock_market_indicator/data/'+code+'.csv')
+
+
+def Cast_Date(date):
+    temp_date = [int(i) for i in date.split('-')]
+    return datetime.date(temp_date[0], temp_date[1], temp_date[2])
+
+def Validate_Dates(date):
+    last_data_date = Cast_Date(date)
+    today = datetime.date.today()
+    tolerant_start_date = today - datetime.timedelta(3)
+    if last_data_date > tolerant_start_date and last_data_date <= today:
+        return True
+    else:
+        return False
  
+def sk_predict(df_data):
+    df = df_data
+    features = []
+    targets = []
+    for x in xrange(0,df.shape[0]-21):
+        features.append(np.array(df['close'][::-1][x:x+20]))
+        if df['close'][::-1][x+21] > df['close'][::-1][x+20]:
+            targets.append(1)
+        else:
+            targets.append(-1)
+        
+
+    features = np.array(features)
+    targets = np.array(targets)
+
+    clf = svm.SVC()
+    clf.fit(features, targets)
+    correct_prediction = (df['close'][::-1][-1:] > df['close'][::-1][-2:-1])
+    sk_prediction = clf.predict(np.array(df['close'][::-1][-21:-1]))
+    print "predicting"
+    print correct_prediction[0]
+    print sk_prediction[0]
+    if sk_prediction[0] == 1:
+        if correct_prediction[0]:
+            return True
+        else:
+            return False
+    elif (sk_prediction[0] == -1):
+        if correct_prediction[0]:
+            return False
+        else:
+            return True
+
+
 #然后定义通过MACD判断买入卖出
 def Get_MACD(df_Code):
     operate_array=[]
@@ -23,53 +82,55 @@ def Get_MACD(df_Code):
 
 # 获取每只股票的历史价格和成交量 对应的列有index列,0 - 6列是 date：日期 open：开盘价 high：最高价 close：收盘价 low：最低价 volume：成交量 price_change：价格变动 p_change：涨跌幅
 # 7-12列是 ma5：5日均价 ma10：10日均价 ma20:20日均价 v_ma5:5日均量v_ma10:10日均量 v_ma20:20日均量
-        df = ts.get_hist_data(code,start='2014-11-20')
+        if df_Code.loc[code].timeToMarket == 0:
+            continue
+        df = Get_Csv_Data(code)
         try:
             dflen = df.shape[0]
         except:
             dflen = 0
         operate = 0
-        if dflen>35:
-            macd, macdsignal, macdhist = ta.MACD(np.array(df['close']), fastperiod=12, slowperiod=26, signalperiod=9)
+        if dflen>35 and Validate_Dates(df.head(1).date[0]):
+            macd, macdsignal, macdhist = ta.MACD(np.array(df['close'][::-1]), fastperiod=12, slowperiod=26, signalperiod=9)
             
             SignalMA5 = ta.MA(macdsignal, timeperiod=5, matype=0)
             SignalMA10 = ta.MA(macdsignal, timeperiod=10, matype=0)
             SignalMA20 = ta.MA(macdsignal, timeperiod=20, matype=0)
 #在后面增加3列，分别是13-15列，对应的是 DIFF  DEA  DIFF-DEA       
-            df['macd']=pd.Series(macd,index=df.index) #DIFF
-            df['macdsignal']=pd.Series(macdsignal,index=df.index)#DEA
-            df['macdhist']=pd.Series(macdhist,index=df.index)#DIFF-DEA
+            df['macd']=pd.Series(macd[::-1],index=df.index) #DIFF
+            df['macdsignal']=pd.Series(macdsignal[::-1],index=df.index)#DEA
+            df['macdhist']=pd.Series(macdhist[::-1],index=df.index)#DIFF-DEA
             MAlen = len(SignalMA5)
 
             #2个数组 1.DIFF、DEA均为正，DIFF向上突破DEA，买入信号。 2.DIFF、DEA均为负，DIFF向下跌破DEA，卖出信号。
-            if df.iat[(dflen-1),13]>0:
-                if df.iat[(dflen-1),14]>0:
-                    if df.iat[(dflen-1),13]>df.iat[(dflen-1),14]:
+            if df.iat[0,13]>0:
+                if df.iat[0,14]>0:
+                    if df.iat[0,13]>df.iat[0,14]:
                         operate = operate + 1#买入
             else:
-                if df.iat[(dflen-1),14]<0:
-                    if df.iat[(dflen-1),13]:
+                if df.iat[0,14]<0:
+                    if df.iat[0,13]:
                         operate = operate - 1#卖出
        
             #3.DEA线与K线发生背离，行情反转信号。
-            if df.iat[(dflen-1),7]>=df.iat[(dflen-1),8] and df.iat[(dflen-1),8]>=df.iat[(dflen-1),9]:#K线上涨
+            if df.iat[0,7]>=df.iat[0,8] and df.iat[0,8]>=df.iat[0,9]:#K线上涨
                 if SignalMA5[MAlen-1]<=SignalMA10[MAlen-1] and SignalMA10[MAlen-1]<=SignalMA20[MAlen-1]: #DEA下降
                     operate = operate - 1
-            elif df.iat[(dflen-1),7]<=df.iat[(dflen-1),8] and df.iat[(dflen-1),8]<=df.iat[(dflen-1),9]:#K线下降
+            elif df.iat[0,7]<=df.iat[0,8] and df.iat[0,8]<=df.iat[0,9]:#K线下降
                 if SignalMA5[MAlen-1]>=SignalMA10[MAlen-1] and SignalMA10[MAlen-1]>=SignalMA20[MAlen-1]: #DEA上涨
                     operate = operate + 1
                
        
             #4.分析MACD柱状线，由负变正，买入信号。
-            if df.iat[(dflen-1),15]>0 and dflen >30 :
+            if df.iat[0,15]>0 and dflen >30 :
                 for i in range(1,26):
-                    if df.iat[(dflen-1-i),15]<=0:#
+                    if df.iat[i+1,15]<=0:#
                         operate = operate + 1
                         break
             #由正变负，卖出信号   
-            if df.iat[(dflen-1),15]<0 and dflen >30 :
+            if df.iat[0,15]<0 and dflen >30 :
                 for i in range(1,26):
-                    if df.iat[(dflen-1-i),15]>=0:#
+                    if df.iat[i+1,15]>=0:#
                         operate = operate - 1
                         break
                
@@ -82,13 +143,15 @@ def Get_MACD(df_Code):
 def cal_KDJ(df_Code):
     fav_stocks = pd.DataFrame(columns=df_Code.columns)
     for code in df_Code.index:
-        df = ts.get_hist_data(code,start='2014-11-20')
+        if df_Code.loc[code].timeToMarket == 0:
+            continue
+        df = Get_Csv_Data(code)
         try:
             dflen = df.shape[0]
         except:
             dflen = 0
         operate = 0
-        if dflen>35:
+        if dflen>35 and Validate_Dates(df.head(1).date[0]):
             slowk, slowd = ta.STOCH(np.array(df['high'][::-1]), np.array(df['low'][::-1]), np.array(df['close'][::-1]),
                                    fastk_period=9,
                                    slowk_period=3,
@@ -97,8 +160,9 @@ def cal_KDJ(df_Code):
                                    slowd_matype=0)
             slowk = slowk[-1]
             slowd = slowd[-1]
+            slowj = 3*slowd - 2*slowk
 
-            if slowk > slowd and slowd > 90:
+            if slowk > slowd and slowk < 20:
                 fav_stocks.loc[code] = df_Code.loc[code]
     return fav_stocks
 
@@ -149,14 +213,43 @@ def Send_Mail (Message,Dist):
         print "success mail"
     except Exception, e:
         print e
-       
-df = Get_Stock_List()
-df = cal_KDJ(df)
-print "KDJ Done"
-# fav_stocks = cal_fav_KDJ()[:100]
-# df = [i[0] for i in fav_stocks]
-df = Get_MACD(df)
-print df
+
+
+time1 = time.time()       
+df_Code = Get_Stock_List()
+correct = 0
+incorrect = 0
+for code in df_Code.index:
+    if df_Code.loc[code].timeToMarket == 0:
+        continue
+    df = Get_Csv_Data(code)
+    try:
+        dflen = df.shape[0]
+    except:
+        dflen = 0
+    if dflen>35:
+        try:
+            TorF = sk_predict(df)
+            if TorF:
+                correct = correct+1
+            else:
+                incorrect = incorrect+1
+        except:
+            pass
+
+print "correct: ", correct
+print "incorrect: ", incorrect
+
+#df = cal_KDJ(df)
+#df = Get_MACD(df)
+#print df.sort_values(['MACD'], ascending=[0])
+print "took ", time.time() - time1, " seconds"
+
+
+
+#-------------------------------todo-------------------------------
+#大盘 j > kd, close > MA5 时交易
+#本地csv，按需获取
 
 # Dist = 'E:\\08 python\\Output\\'
 # Output_Csv(df,Dist)
