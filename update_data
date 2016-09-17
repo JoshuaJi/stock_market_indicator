@@ -3,18 +3,19 @@ from numpy import *
 import pandas as pd
 
 def updata_data(ticker):
-    old_list = pd.read_csv('E:/Stock Data/' + ticker + '.csv',index_col=0)
+    old_list = pd.read_csv('E:/Stock Data/' + ticker + '.csv',index_col= 0)
     last_date = len(old_list)
     print(last_date)
     print(old_list)
-    stdate = old_list.date[last_date-1]     #last date in old list
+    stdate = old_list.index[last_date-1]     #last date in old list
     endate = '2020-12-31'
     newdata = ts.get_h_data(ticker, stdate, endate)
     newdata = newdata[::-1]
     newdata = newdata[1:]
     print (newdata)
-    old_list = old_list.append(newdata,True)
+    old_list = old_list.append(newdata)
     print (old_list)
     #old_list.to_csv('E:/Stock Data/' + ticker + '.csv')
 
 updata_data('000001')
+
