@@ -8,7 +8,7 @@ base_dir = '/home/joshua/Desktop/smart_home/stock_market_indicator/data_yahoo/'
 df = ts.get_stock_basics()
 
 def Format_api_code(code):
-	
+
 	if code[0] == '6':
 		return code + ".ss"
 	else:
@@ -36,6 +36,8 @@ def Update_All_Csv():
 			try:
 				end_date = end_date.split('-')
 				end_date = datetime.date(int(end_date[0]), int(end_date[1]), int(end_date[2]))
+				if end_date == datetime.date.today():
+					break;
 				patch_start_date = end_date + datetime.timedelta(1)
 			except:
 				print 'split error: ', code, end_date, type(end_date)
