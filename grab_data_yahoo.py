@@ -4,7 +4,7 @@ import pandas as pd
 import datetime
 from pandas_datareader import data, wb
 
-base_dir = '/home/joshua/Desktop/smart_home/stock_market_indicator/data_yahoo/'
+base_dir = '/home/joshua/Desktop/home_automation/stock_market_indicator/data_yahoo/'
 df = ts.get_stock_basics()
 
 def Format_api_code(code):
